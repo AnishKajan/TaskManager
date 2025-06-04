@@ -1,18 +1,22 @@
 FROM --platform=linux/arm64 node:18-alpine
 
-# Install necessary tools to compile native modules like bcrypt
+# Install necessary build tools for native modules like bcrypt
 RUN apk add --no-cache make gcc g++ python3
 
+# Set working directory
 WORKDIR /app
 
-# Copy only dependency-related files first to cache this layer
+# Copy only dependency declarations to leverage caching
 COPY package*.json ./
 
-# Use npm install since you may not have a lock file yet
-RUN npm install
+# Install dependencies
+RUN npm install --omit=dev
 
-# Copy the rest of the application code
+# Copy the full app source into the container
 COPY . .
 
-EXPOSE 5000
-CMD ["npx", "nodemon", "server.js"]
+# Expose backend port
+EXPOSE 5050
+
+# Run the backend server using node
+CMD ["node", "server.js"]
