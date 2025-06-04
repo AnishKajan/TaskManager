@@ -1,25 +1,30 @@
 const { MongoClient } = require('mongodb');
 require('dotenv').config();
 
-const client = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const uri = process.env.MONGO_URI;
+const dbName = process.env.MONGO_DB_NAME || 'taskmanager'; // Optional: set DB name in .env
 
+let client;
 let db;
 
 async function connectDB() {
-  if (!db) {
-    try {
+  if (db) return db;
+
+  try {
+    if (!client) {
+      client = new MongoClient(uri, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
       await client.connect();
-      db = client.db(); // Automatically uses the DB from MONGO_URI (e.g., 'taskmanager')
-      console.log('MongoDB connected successfully');
-    } catch (err) {
-      console.error('MongoDB connection failed:', err);
-      throw err;
     }
+
+    db = client.db(dbName);
+    return db;
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    throw err;
   }
-  return db;
 }
 
 module.exports = connectDB;
