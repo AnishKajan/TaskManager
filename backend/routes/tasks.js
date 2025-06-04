@@ -22,22 +22,66 @@ function authMiddleware(req, res, next) {
 // Get all tasks for the logged-in user
 router.get('/', authMiddleware, async (req, res) => {
   const db = await connectDB();
-  const tasks = await db.collection('tasks').find({ userId: req.userId }).toArray();
+  const tasks = await db.collection('tasks')
+    .find({ userId: req.userId })
+    .sort({ 
+      'date': 1, 
+      'startTime.period': 1, 
+      'startTime.hour': 1, 
+      'startTime.minute': 1 
+    })
+    .toArray();
   res.json(tasks);
 });
 
 // Create a new task
 router.post('/', authMiddleware, async (req, res) => {
-  const db = await connectDB();
-  const task = {
-    ...req.body,
-    userId: req.userId,
-    status: 'pending',
-    createdAt: new Date(),
-  };
-  const result = await db.collection('tasks').insertOne(task);
-  const createdTask = await db.collection('tasks').findOne({ _id: result.insertedId });
-  res.status(201).json(createdTask);
+  try {
+    const db = await connectDB();
+    const {
+      title,
+      date,
+      startHour,
+      startMin,
+      startPeriod,
+      endHour,
+      endMin,
+      endPeriod,
+      collaborators,
+      priority,
+      recurring,
+      category
+    } = req.body;
+
+    const task = {
+      title,
+      date,
+      startTime: {
+        hour: startHour,
+        minute: startMin,
+        period: startPeriod
+      },
+      endTime: {
+        hour: endHour || null,
+        minute: endMin || null,
+        period: endPeriod || null
+      },
+      collaborators: collaborators || [],
+      priority: priority || '',
+      recurring: recurring || false,
+      category: category || 'Work',
+      userId: req.userId,
+      status: 'pending',
+      createdAt: new Date()
+    };
+
+    const result = await db.collection('tasks').insertOne(task);
+    const createdTask = await db.collection('tasks').findOne({ _id: result.insertedId });
+    res.status(201).json(createdTask);
+  } catch (err) {
+    console.error('Create task error:', err);
+    res.status(500).json({ message: 'Failed to create task' });
+  }
 });
 
 // Delete a task by ID
