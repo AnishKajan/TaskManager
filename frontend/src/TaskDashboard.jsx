@@ -1,166 +1,201 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
+import AddTaskModal from './components/AddTaskModal';
+import EditTaskModal from './components/EditTaskModal';
+import SettingsModal from './components/SettingsModal';
+import { IconButton, Button, Box, Typography, Chip, Avatar } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
 
 const API = 'http://localhost:5050/api';
 
-function TaskDashboard(){
-  const [tasks, setTasks] = useState([]);
-  const [title, setTitle] = useState('');
-  const [token, setToken] = useState(() => {
-    localStorage.removeItem('token'); // Force login each time
-    return '';
-  });
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [selectedTaskId, setSelectedTaskId] = useState(null);
+function TaskDashboard() {
+  const [tasks, setTasks] = useState({ work: [], school: [], personal: [] });
+  const [activeTab, setActiveTab] = useState('work');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editTask, setEditTask] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const token = localStorage.getItem('token');
 
   useEffect(() => {
     if (!token) return;
-    axios
-      .get(`${API}/tasks`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then((res) => setTasks(res.data));
+
+    axios.get(`${API}/tasks`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => {
+      const categorized = { work: [], school: [], personal: [] };
+      res.data.forEach((task) => {
+        const section = task.section || 'work';
+        if (categorized[section]) categorized[section].push(task);
+      });
+      Object.keys(categorized).forEach(key => {
+        categorized[key] = sortTasksByTime(categorized[key]);
+      });
+      setTasks(categorized);
+    }).catch(err => {
+      console.error('❌ Failed to fetch tasks:', err);
+    });
   }, [token]);
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (!e.target.closest('.task')) setSelectedTaskId(null);
-    };
-    window.addEventListener('click', handleClickOutside);
-    return () => window.removeEventListener('click', handleClickOutside);
-  }, []);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await axios.post(`${API}/auth/login`, { email, password });
-      localStorage.setItem('token', res.data.token);
-      setToken(res.data.token);
-    } catch (err) {
-      alert('Login failed. Please check your credentials.');
-    }
+  const sortTasksByTime = (list) => {
+    return [...list].sort((a, b) => {
+      const toMinutes = (h, m, period) =>
+        (parseInt(h) % 12 + (period === 'PM' ? 12 : 0)) * 60 + parseInt(m);
+      return toMinutes(a.startHour, a.startMin, a.startPeriod) -
+             toMinutes(b.startHour, b.startMin, b.startPeriod);
+    });
   };
 
-  if (!token) {
-    return (
-      <div className="login-screen">
-        <h2>Login</h2>
-        <form onSubmit={handleLogin}>
-          <input
-            type="text"
-            placeholder="Username or Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          /><br />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          /><br />
-          <button type="submit">Login</button>
-        </form>
-        <p style={{ fontSize: '0.9rem' }}>
-          Try <strong>taskuser</strong> / <strong>taskpass123</strong> if you're just testing.
-        </p>
-      </div>
-    );
-  }
-
-  const renderTaskButtons = (task) => {
-    const isComplete = task.status === 'complete';
-    return (
-      <>
-        <button onClick={() => handleDelete(task._id)}>Delete</button>
-        <button onClick={() => toggleStatus(task._id)}>
-          {isComplete ? 'Incomplete' : 'Complete'}
-        </button>
-      </>
-    );
+  const handleCreate = (taskData) => {
+    axios.post(`${API}/tasks`, taskData, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => {
+      const section = res.data.section || 'work';
+      setTasks(prev => ({
+        ...prev,
+        [section]: sortTasksByTime([...prev[section], res.data]),
+      }));
+      setShowAddModal(false);
+    }).catch(err => {
+      console.error('❌ Failed to create task:', err);
+    });
   };
 
-  const renderTaskList = () => (
-    <Droppable droppableId="tasks">
+  const handleEdit = (updatedTask) => {
+    axios.put(`${API}/tasks/${updatedTask._id}`, updatedTask, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => {
+      const section = res.data.section || 'work';
+      setTasks(prev => ({
+        ...prev,
+        [section]: sortTasksByTime(prev[section].map(t => t._id === res.data._id ? res.data : t)),
+      }));
+      setShowEditModal(false);
+    }).catch(err => {
+      console.error('❌ Failed to update task:', err);
+    });
+  };
+
+  const handleDelete = (taskId) => {
+    axios.delete(`${API}/tasks/${taskId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(() => {
+      setTasks(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(section => {
+          updated[section] = updated[section].filter(t => t._id !== taskId);
+        });
+        return updated;
+      });
+    }).catch(err => {
+      console.error('❌ Failed to delete task:', err);
+    });
+  };
+
+  const toggleStatus = (taskId) => {
+    const task = Object.values(tasks).flat().find(t => t._id === taskId);
+    if (!task) return;
+
+    const newStatus = task.status === 'complete' ? 'pending' : 'complete';
+    axios.patch(`${API}/tasks/${taskId}`, { status: newStatus }, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => {
+      const section = res.data.section || 'work';
+      setTasks(prev => ({
+        ...prev,
+        [section]: prev[section].map(t => t._id === res.data._id ? res.data : t),
+      }));
+    }).catch(err => {
+      console.error('❌ Failed to toggle task status:', err);
+    });
+  };
+
+  const renderTask = (task, index) => (
+    <Draggable key={task._id} draggableId={task._id} index={index}>
       {(provided) => (
-        <div {...provided.droppableProps} ref={provided.innerRef}>
-          {tasks.map((task, index) => (
-            <Draggable key={task._id} draggableId={task._id} index={index}>
-              {(provided) => (
-                <div
-                  className={`task ${task.status === 'complete' ? 'completed' : ''}`}
-                  ref={provided.innerRef}
-                  {...provided.draggableProps}
-                  {...provided.dragHandleProps}
-                  onClick={() => setSelectedTaskId(task._id)}
-                >
-                  <h4>{task.title}</h4>
-                  {renderTaskButtons(task)}
-                </div>
-              )}
-            </Draggable>
-          ))}
-          {provided.placeholder}
-        </div>
+        <Box
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          sx={{
+            mb: 2, p: 2, background: '#f5f5f5',
+            borderRadius: '8px', display: 'flex', gap: 2
+          }}
+        >
+          <Avatar>{task.collaborators?.[0]?.charAt(0)?.toUpperCase() || 'A'}</Avatar>
+          <Box flex={1}>
+            <Typography fontWeight={600}>{task.name}</Typography>
+            <Typography>
+              {`${task.startHour}:${task.startMin.toString().padStart(2, '0')} ${task.startPeriod}`} -
+              {task.endHour && task.endMin
+                ? ` ${task.endHour}:${task.endMin.toString().padStart(2, '0')} ${task.endPeriod}`
+                : ' TBD'}
+            </Typography>
+            <Typography>Priority: {task.priority || 'None'}</Typography>
+            <Typography>Recurring: {task.recurring ? 'Yes' : 'None'}</Typography>
+          </Box>
+          <Chip label={task.status || 'Pending'} color={task.status === 'complete' ? 'success' : 'warning'} />
+          <Box>
+            <Button size="small" onClick={() => handleDelete(task._id)}>Delete</Button>
+            <Button size="small" onClick={() => toggleStatus(task._id)}>
+              {task.status === 'complete' ? 'Mark Incomplete' : 'Mark Complete'}
+            </Button>
+            <Button size="small" onClick={() => {
+              setEditTask(task);
+              setShowEditModal(true);
+            }}>Edit</Button>
+          </Box>
+        </Box>
       )}
-    </Droppable>
+    </Draggable>
   );
 
   return (
-    <div className="App">
-      <h1>Task Manager</h1>
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="New Task"
+    <Box className="dashboard" padding={4}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Box>
+          <Button onClick={() => setActiveTab('work')} variant={activeTab === 'work' ? 'contained' : 'outlined'}>Work</Button>
+          <Button onClick={() => setActiveTab('school')} variant={activeTab === 'school' ? 'contained' : 'outlined'} sx={{ mx: 1 }}>School</Button>
+          <Button onClick={() => setActiveTab('personal')} variant={activeTab === 'personal' ? 'contained' : 'outlined'}>Personal</Button>
+        </Box>
+        <Button variant="contained" color="success" onClick={() => setShowAddModal(true)}>
+          Click Here to Add Task
+        </Button>
+        <IconButton onClick={() => setShowSettings(true)}>
+          <SettingsIcon fontSize="large" />
+        </IconButton>
+      </Box>
+
+      <DragDropContext onDragEnd={() => {}}>
+        <Droppable droppableId="tasks">
+          {(provided) => (
+            <Box {...provided.droppableProps} ref={provided.innerRef}>
+              {(tasks[activeTab] || []).map((task, index) => renderTask(task, index))}
+              {provided.placeholder}
+            </Box>
+          )}
+        </Droppable>
+      </DragDropContext>
+
+      <AddTaskModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onAdd={handleCreate}
+        section={activeTab}
       />
-      <button onClick={handleCreate}>Add Task</button>
-      <DragDropContext onDragEnd={handleDragEnd}>{renderTaskList()}</DragDropContext>
-    </div>
+      <EditTaskModal
+        open={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        task={editTask}
+        onSave={handleEdit}
+      />
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
+    </Box>
   );
-
-  function handleCreate() {
-    if (!title.trim()) return;
-    axios
-      .post(
-        `${API}/tasks`,
-        { title },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      .then((res) => setTasks((prev) => [...prev, res.data]));
-    setTitle('');
-  }
-
-  function handleDelete(taskId) {
-    axios
-      .delete(`${API}/tasks/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then(() => setTasks((prev) => prev.filter((t) => t._id !== taskId)));
-  }
-
-  function toggleStatus(taskId) {
-    const task = tasks.find((t) => t._id === taskId);
-    const newStatus = task.status === 'complete' ? 'pending' : 'complete';
-    axios
-      .patch(
-        `${API}/tasks/${taskId}`,
-        { status: newStatus },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      .then((res) =>
-        setTasks((prev) => prev.map((t) => (t._id === taskId ? res.data : t)))
-      );
-  }
-
-  function handleDragEnd(result) {
-    if (!result.destination) return;
-    const reordered = [...tasks];
-    const [removed] = reordered.splice(result.source.index, 1);
-    reordered.splice(result.destination.index, 0, removed);
-    setTasks(reordered);
-  }
 }
 
 export default TaskDashboard;
